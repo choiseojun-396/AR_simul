@@ -12,6 +12,9 @@ const CONFIG = {
   ANIM_ORDER: null,                 // 탭 순서 지정 예: ['jump','wave','spin'] / null 이면 GLB 순서
   FADE: 0.2,                        // 애니메이션 전환 시간(초)
   SMOOTH: 0.35,                     // 자이로 떨림 보정 (0~1, 작을수록 부드럽고 느림)
+  FOLLOW: true,                     // 화면 밖으로 나가면 캐릭터가 다시 화면 안으로 따라옴
+  FOLLOW_EDGE: 0.7,                 // 화면 가장자리 몇 % 지점에서 따라오기 시작할지 (0~1)
+  FOLLOW_SPEED: 0.06,               // 따라오는 속도 (0~1)
 };
 
 const $ = (id) => document.getElementById(id);
@@ -127,6 +130,22 @@ async function start(gyroPerm, camPromise) {
   placeInFront();
   $('recenter').onclick = placeInFront;
 
+  // 화면 밖으로 벗어나면 지금 보는 방향 쪽으로 부드럽게 따라오기
+  const center = new THREE.Vector3(), goal = new THREE.Vector3();
+  let following = false;
+  function follow() {
+    center.copy(stage.position).setY(stage.position.y + size.y / 2).project(camera);
+    const out = center.z > 1 || Math.abs(center.x) > CONFIG.FOLLOW_EDGE || Math.abs(center.y) > CONFIG.FOLLOW_EDGE;
+    if (out) following = true;
+    if (!following) return;
+    // 목표: 화면 중앙 방향으로 DISTANCE 만큼 앞 (캐릭터 중심이 화면 중앙에 오도록)
+    goal.set(0, 0, -1).applyQuaternion(camera.quaternion).multiplyScalar(CONFIG.DISTANCE);
+    goal.y -= size.y / 2;
+    stage.position.lerp(goal, CONFIG.FOLLOW_SPEED);
+    stage.lookAt(0, stage.position.y, 0);
+    if (stage.position.distanceTo(goal) < 0.01) following = false;
+  }
+
   // ===== 애니메이션 =====
   const mixer = new THREE.AnimationMixer(character.root);
   const clips = character.clips || [];
@@ -169,6 +188,7 @@ async function start(gyroPerm, camPromise) {
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
     if (gotGyro) camera.quaternion.slerp(target, CONFIG.SMOOTH);
+    if (CONFIG.FOLLOW) follow();
     mixer.update(clock.getDelta());
     renderer.render(scene, camera);
   });

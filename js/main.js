@@ -11,6 +11,8 @@ const CONFIG = {
   IDLE_NAME: 'idle',                // 대기 애니메이션 이름
   ANIM_ORDER: null,                 // 탭 순서 지정 예: ['jump','wave','spin'] / null 이면 GLB 순서
   FADE: 0.2,                        // 애니메이션 전환 시간(초)
+  ANIM_LABELS: { jump: '점프', wave: '손 흔들기', spin: '회전' }, // 버튼에 표시할 이름 (없으면 애니메이션 이름 그대로)
+  ROTATE_SPEED: 0.012,              // 스와이프 회전 감도
   SMOOTH: 0.35,                     // 자이로 떨림 보정 (0~1, 작을수록 부드럽고 느림)
   FOLLOW: true,                     // 화면 밖으로 나가면 캐릭터가 다시 화면 안으로 따라옴
   FOLLOW_EDGE: 0.7,                 // 화면 가장자리 몇 % 지점에서 따라오기 시작할지 (0~1)
@@ -155,33 +157,69 @@ async function start(gyroPerm, camPromise) {
   const idle = idleClip ? mixer.clipAction(idleClip).play() : null;
   let idx = 0, playing = null;
 
-  function playNext() {
-    if (playing || !order.length) return;
-    const action = mixer.clipAction(order[idx]);
-    idx = (idx + 1) % order.length;
+  // 애니메이션 버튼 만들기
+  const bar = $('anims');
+  const btns = order.map((clip, i) => {
+    const b = document.createElement('button');
+    b.textContent = CONFIG.ANIM_LABELS[clip.name] || clip.name;
+    b.onclick = () => { idx = (i + 1) % order.length; play(clip); };
+    bar.appendChild(b);
+    return b;
+  });
+  const mark = (clip) => btns.forEach((b, i) => b.classList.toggle('on', order[i] === clip));
+
+  function play(clip) {
+    const action = mixer.clipAction(clip);
+    const from = playing || idle;
     action.reset().setLoop(THREE.LoopOnce, 1);
     action.clampWhenFinished = true;
     action.play();
-    if (idle) idle.crossFadeTo(action, CONFIG.FADE, false);
+    if (from && from !== action) from.crossFadeTo(action, CONFIG.FADE, false);
     playing = action;
+    mark(clip);
+  }
+  function playNext() {
+    if (!order.length) return;
+    const clip = order[idx];
+    idx = (idx + 1) % order.length;
+    play(clip);
   }
   mixer.addEventListener('finished', (e) => {
     if (e.action !== playing) return;
     if (idle) { idle.reset().play(); playing.crossFadeTo(idle, CONFIG.FADE, false); }
     playing = null;
+    mark(null);
   });
 
-  // ===== 탭 =====
+  // ===== 탭 = 다음 애니메이션 / 좌우 스와이프 = 캐릭터 회전 =====
   const ray = new THREE.Raycaster();
   const ptr = new THREE.Vector2();
-  $('gl').addEventListener('pointerdown', (e) => {
-    ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-    ray.setFromCamera(ptr, camera);
-    if (ray.intersectObject(hit, false).length) playNext();
+  const gl = $('gl');
+  let drag = null;
+  gl.addEventListener('pointerdown', (e) => {
+    drag = { x: e.clientX, last: e.clientX, moved: false };
+    gl.setPointerCapture(e.pointerId);
   });
+  gl.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!drag.moved && Math.abs(e.clientX - drag.x) > 8) drag.moved = true;
+    if (drag.moved) character.root.rotation.y += (e.clientX - drag.last) * CONFIG.ROTATE_SPEED;
+    drag.last = e.clientX;
+  });
+  const end = (e) => {
+    if (drag && !drag.moved) {
+      ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+      ray.setFromCamera(ptr, camera);
+      if (ray.intersectObject(hit, false).length) playNext();
+    }
+    drag = null;
+  };
+  gl.addEventListener('pointerup', end);
+  gl.addEventListener('pointercancel', () => (drag = null));
 
   $('intro').hidden = true;
   $('recenter').hidden = false;
+  bar.hidden = !order.length;
   setStatus(perm === 'granted' ? '캐릭터를 탭해 보세요' : '자이로 권한이 없어 고정 화면으로 보여요');
   setTimeout(() => setStatus(''), 4000);
 

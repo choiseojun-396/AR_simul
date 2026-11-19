@@ -9,8 +9,8 @@ const CONFIG = {
   HEIGHT: -0.2,                     // 눈높이 기준 캐릭터 바닥 높이(미터, 음수 = 아래)
   FOV: 60,                          // 카메라 세로 화각
   IDLE_NAME: 'idle',                // 대기 애니메이션 이름
-  ANIM_ORDER: null,                 // 탭 순서 지정 예: ['jump','wave','spin'] / null 이면 GLB 순서
-  ANIM_LABELS: { jump: '점프', wave: '손 흔들기', spin: '회전' }, // 버튼 이름
+  ANIM_ORDER: ['jump', 'wave', 'spin', 'flop'], // 탭·버튼 순서 (없는 이름은 자동으로 건너뜀)
+  ANIM_LABELS: { jump: '점프', wave: '손 흔들기', spin: '회전', flop: '꽈당' }, // 버튼 이름
   FADE: 0.2,                        // 애니메이션 전환 시간(초)
   SMOOTH: 0.35,                     // 자이로 떨림 보정 (0~1)
   FOLLOW_EDGE: 0.7,                 // 화면 가장자리 몇 % 지점에서 따라오기 시작할지
@@ -201,7 +201,7 @@ async function start(gyroPerm, camPromise) {
   const clips = character.clips || [];
   const idleClip = clips.find((c) => c.name.toLowerCase().includes(CONFIG.IDLE_NAME)) || clips[0];
   let order = clips.filter((c) => c !== idleClip);
-  if (CONFIG.ANIM_ORDER) order = CONFIG.ANIM_ORDER.map((n) => clips.find((c) => c.name === n)).filter(Boolean);
+  if (CONFIG.ANIM_ORDER) order = CONFIG.ANIM_ORDER.map((n) => clips.find((c) => c.name === n || c.name.toLowerCase().includes(n))).filter(Boolean);
   const idle = idleClip ? mixer.clipAction(idleClip).play() : null;
   let idx = 0, playing = null;
 

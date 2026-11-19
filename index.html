@@ -22,7 +22,11 @@
     button { font-size: 18px; padding: 14px 28px; border: 0; border-radius: 999px; background: #ffcf3f; color: #222; font-weight: 700; }
     button:disabled { opacity: .5; }
     #recenter { position: fixed; top: 16px; right: 16px; z-index: 20; font-size: 14px; padding: 10px 16px; background: rgba(255,255,255,.85); }
-    #status { position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 20; background: rgba(0,0,0,.6); color: #fff; padding: 10px 18px; border-radius: 999px; font-size: 15px; white-space: nowrap; pointer-events: none; }
+    #gl { touch-action: none; }
+    #anims { position: fixed; left: 0; right: 0; bottom: 20px; z-index: 20; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; padding: 0 12px; }
+    #anims button { font-size: 15px; padding: 10px 16px; background: rgba(255,255,255,.88); }
+    #anims button.on { background: #ffcf3f; }
+    #status { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 20; background: rgba(0,0,0,.6); color: #fff; padding: 10px 18px; border-radius: 999px; font-size: 15px; white-space: nowrap; pointer-events: none; }
     #status:empty { display: none; }
     [hidden] { display: none !important; }
   </style>
@@ -31,10 +35,11 @@
   <video id="video" playsinline muted autoplay></video>
   <canvas id="gl"></canvas>
   <button id="recenter" hidden>캐릭터 앞으로</button>
+  <div id="anims" hidden></div>
 
   <div id="intro" class="panel">
     <h1>AR 캐릭터</h1>
-    <p>시작을 누르고 카메라·동작 권한을 허용해 주세요.<br>캐릭터를 탭하면 동작이 바뀌어요.</p>
+    <p>시작을 누르고 카메라·동작 권한을 허용해 주세요.<br>캐릭터를 탭하거나 아래 버튼으로 동작을 바꾸고,<br>좌우로 밀어서 돌려 볼 수 있어요.</p>
     <button id="start">AR 시작</button>
   </div>
 

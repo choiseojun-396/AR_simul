@@ -1,17 +1,17 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { MindARThree } from 'mindar-image-three';
 import { createPlaceholder } from './placeholder.js';
 
 // ===== 설정 =====
 const CONFIG = {
-  MODEL_URL: 'model/character.glb',   // 이 파일이 있으면 실제 캐릭터, 없으면 임시 캐릭터
-  MARKER_IMAGE: 'assets/marker.png',
-  MARKER_MIND: 'assets/targets.mind', // tools/compile-marker.html 로 만든 파일 (없으면 실행 시 자동 생성)
-  MARKER_WIDTH_M: 0.148,              // 인쇄한 마커의 실제 가로 길이(미터). A6 가로 = 14.8cm
-  IDLE_NAME: 'idle',                  // 대기 애니메이션 이름
-  ANIM_ORDER: null,                   // 탭 순서 지정 예: ['jump','wave','spin'] / null 이면 GLB에 들어있는 순서
-  FADE: 0.2,                          // 애니메이션 전환 시간(초)
+  MODEL_URL: 'model/character.glb', // 이 파일이 있으면 실제 캐릭터, 없으면 임시 캐릭터
+  DISTANCE: 0.4,                    // 캐릭터까지 거리(미터)
+  HEIGHT: -0.2,                     // 눈높이 기준 캐릭터 바닥 높이(미터, 음수 = 아래)
+  FOV: 60,                          // 카메라 세로 화각
+  IDLE_NAME: 'idle',                // 대기 애니메이션 이름
+  ANIM_ORDER: null,                 // 탭 순서 지정 예: ['jump','wave','spin'] / null 이면 GLB 순서
+  FADE: 0.2,                        // 애니메이션 전환 시간(초)
+  SMOOTH: 0.35,                     // 자이로 떨림 보정 (0~1, 작을수록 부드럽고 느림)
 };
 
 const $ = (id) => document.getElementById(id);
@@ -19,12 +19,11 @@ const setStatus = (t) => ($('status').textContent = t);
 
 // ===== 인앱 브라우저(카카오톡 등) 처리 =====
 const ua = navigator.userAgent;
-const isAndroid = /Android/i.test(ua);
 const inApp = /KAKAOTALK|Instagram|FBAN|FBAV|NAVER\(inapp|Line\/|DaumApps|everytimeApp/i.test(ua);
 if (inApp) {
   if (/KAKAOTALK/i.test(ua)) {
     location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(location.href);
-  } else if (isAndroid) {
+  } else if (/Android/i.test(ua)) {
     location.href = `intent://${location.host}${location.pathname}${location.search}#Intent;scheme=https;package=com.android.chrome;end`;
   }
   $('inapp').hidden = false;
@@ -33,65 +32,48 @@ if (inApp) {
   };
 }
 
-$('start').onclick = () => start().catch((e) => { console.error(e); setStatus('오류: ' + (e.message || e)); $('start').disabled = false; });
-
-async function getTargetSrc() {
-  const r = await fetch(CONFIG.MARKER_MIND, { method: 'HEAD' }).catch(() => null);
-  if (r && r.ok) return CONFIG.MARKER_MIND;
-  // .mind 파일이 없으면 마커 이미지를 즉석에서 변환 (수 초 소요)
-  setStatus('마커 준비 중... 0%');
-  const mod = await import('mindar-image');
-  const Compiler = mod.Compiler || window.MINDAR.IMAGE.Compiler;
-  const img = new Image();
-  img.src = CONFIG.MARKER_IMAGE;
-  await img.decode();
-  const compiler = new Compiler();
-  await compiler.compileImageTargets([img], (p) => setStatus(`마커 준비 중... ${Math.round(p)}%`));
-  const data = await compiler.exportData();
-  return URL.createObjectURL(new Blob([data]));
-}
+$('start').onclick = () => {
+  // iOS: 자이로 권한 요청은 반드시 탭 직후 동기적으로 호출해야 함
+  const gyroPerm = typeof DeviceOrientationEvent !== 'undefined' && DeviceOrientationEvent.requestPermission
+    ? DeviceOrientationEvent.requestPermission().catch(() => 'denied')
+    : Promise.resolve('granted');
+  const cam = navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
+  start(gyroPerm, cam).catch((e) => { console.error(e); setStatus('오류: ' + (e.message || e)); });
+};
 
 async function loadCharacter() {
   try {
     const gltf = await new GLTFLoader().loadAsync(CONFIG.MODEL_URL);
     return { root: gltf.scene, clips: gltf.animations };
   } catch {
-    console.info('GLB 없음 → 임시 캐릭터 사용');
     return createPlaceholder();
   }
 }
 
-async function start() {
+async function start(gyroPerm, camPromise) {
   $('start').disabled = true;
-  const [targetSrc, character] = await Promise.all([getTargetSrc(), loadCharacter()]);
   setStatus('카메라 켜는 중...');
+  const [perm, stream, character] = await Promise.all([gyroPerm, camPromise, loadCharacter()]);
 
-  const mindar = new MindARThree({
-    container: $('ar'),
-    imageTargetSrc: targetSrc,
-    uiLoading: 'no',
-    uiScanning: 'no',
-    filterMinCF: 0.0001, // 떨림 줄이기
-    filterBeta: 0.001,
-  });
-  const { renderer, scene, camera } = mindar;
+  const video = $('video');
+  video.srcObject = stream;
+  await video.play();
+
+  // ===== 3D =====
+  const renderer = new THREE.WebGLRenderer({ canvas: $('gl'), alpha: true, antialias: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(CONFIG.FOV, 1, 0.01, 20);
   scene.add(new THREE.HemisphereLight(0xffffff, 0x777788, 2.2));
   const sun = new THREE.DirectionalLight(0xffffff, 1.5);
-  sun.position.set(0.5, 1, 2);
+  sun.position.set(0.5, 2, 1);
   scene.add(sun);
 
-  const anchor = mindar.addAnchor(0);
-
-  // 마커 좌표계: 가로 = 1 단위, 이미지 면 = XY, 위쪽 = +Z
   const stage = new THREE.Group();
-  stage.rotation.x = Math.PI / 2;            // 캐릭터를 카드 위에 세우기
-  stage.scale.setScalar(1 / CONFIG.MARKER_WIDTH_M); // 미터 → 마커 단위
-  anchor.group.add(stage);
+  scene.add(stage);
   stage.add(character.root);
 
-  // 바닥 그림자
   const box = new THREE.Box3().setFromObject(character.root);
   const size = box.getSize(new THREE.Vector3());
   const shadow = new THREE.Mesh(
@@ -101,14 +83,49 @@ async function start() {
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.0005;
   stage.add(shadow);
-
-  // 탭 판정용 투명 구 (캐릭터보다 살짝 크게)
   const hit = new THREE.Mesh(
-    new THREE.SphereGeometry(Math.max(size.x, size.y, size.z) * 0.65, 12, 8),
+    new THREE.SphereGeometry(Math.max(size.x, size.y, size.z) * 0.7, 12, 8),
     new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
   );
   hit.position.y = size.y / 2;
   stage.add(hit);
+
+  function resize() {
+    const w = innerWidth, h = innerHeight;
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+  }
+  addEventListener('resize', resize);
+  resize();
+
+  // ===== 자이로 → 카메라 방향 =====
+  const target = new THREE.Quaternion();
+  const euler = new THREE.Euler();
+  const zee = new THREE.Vector3(0, 0, 1);
+  const q0 = new THREE.Quaternion();
+  const q1 = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // 폰 화면이 아닌 뒷면 카메라 방향
+  let gotGyro = false;
+  addEventListener('deviceorientation', (e) => {
+    if (e.alpha == null) return;
+    const d = THREE.MathUtils.DEG2RAD;
+    const orient = ((screen.orientation && screen.orientation.angle) || window.orientation || 0) * d;
+    euler.set(e.beta * d, e.alpha * d, -e.gamma * d, 'YXZ');
+    target.setFromEuler(euler).multiply(q1).multiply(q0.setFromAxisAngle(zee, -orient));
+    if (!gotGyro) { gotGyro = true; camera.quaternion.copy(target); placeInFront(); }
+  });
+
+  // 캐릭터를 지금 보고 있는 방향 앞에 놓기
+  function placeInFront() {
+    const fwd = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    fwd.y = 0;
+    if (fwd.lengthSq() < 1e-4) fwd.set(0, 0, -1);
+    fwd.normalize();
+    stage.position.copy(fwd.multiplyScalar(CONFIG.DISTANCE)).setY(CONFIG.HEIGHT);
+    stage.lookAt(0, CONFIG.HEIGHT, 0); // 캐릭터가 나를 보도록
+  }
+  placeInFront();
+  $('recenter').onclick = placeInFront;
 
   // ===== 애니메이션 =====
   const mixer = new THREE.AnimationMixer(character.root);
@@ -128,7 +145,6 @@ async function start() {
     action.play();
     if (idle) idle.crossFadeTo(action, CONFIG.FADE, false);
     playing = action;
-    setStatus(`▶ ${action.getClip().name}`);
   }
   mixer.addEventListener('finished', (e) => {
     if (e.action !== playing) return;
@@ -139,24 +155,20 @@ async function start() {
   // ===== 탭 =====
   const ray = new THREE.Raycaster();
   const ptr = new THREE.Vector2();
-  let visible = false;
-  window.addEventListener('pointerdown', (e) => {
-    if (!visible) return;
-    const r = renderer.domElement.getBoundingClientRect();
-    ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+  $('gl').addEventListener('pointerdown', (e) => {
+    ptr.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
     ray.setFromCamera(ptr, camera);
     if (ray.intersectObject(hit, false).length) playNext();
   });
 
-  anchor.onTargetFound = () => { visible = true; setStatus('캐릭터를 탭해 보세요'); };
-  anchor.onTargetLost = () => { visible = false; setStatus('마커 카드를 비춰 주세요'); };
-
-  await mindar.start();
   $('intro').hidden = true;
-  setStatus('마커 카드를 비춰 주세요');
+  $('recenter').hidden = false;
+  setStatus(perm === 'granted' ? '캐릭터를 탭해 보세요' : '자이로 권한이 없어 고정 화면으로 보여요');
+  setTimeout(() => setStatus(''), 4000);
 
   const clock = new THREE.Clock();
   renderer.setAnimationLoop(() => {
+    if (gotGyro) camera.quaternion.slerp(target, CONFIG.SMOOTH);
     mixer.update(clock.getDelta());
     renderer.render(scene, camera);
   });
